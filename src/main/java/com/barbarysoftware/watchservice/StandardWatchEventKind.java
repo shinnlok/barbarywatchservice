@@ -80,7 +80,7 @@ public final class StandardWatchEventKind {
     public static final WatchEvent.Kind<WatchableFile> ENTRY_MODIFY =
         new StdWatchEventKind<WatchableFile>("ENTRY_MODIFY", WatchableFile.class);
 
-    private static class StdWatchEventKind<T> implements WatchEvent.Kind<T> {
+    protected static class StdWatchEventKind<T> implements WatchEvent.Kind<T> {
         private final String name;
         private final Class<T> type;
         StdWatchEventKind(String name, Class<T> type) {

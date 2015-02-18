@@ -7,7 +7,6 @@ import com.sun.jna.Pointer;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * This class contains the bulk of my implementation of the Watch Service API. It hooks into Carbon's
@@ -25,7 +24,6 @@ class MacOSXListeningWatchService extends AbstractWatchService {
     @Override
     WatchKey register(WatchableFile watchableFile, WatchEvent.Kind<?>[] events, WatchEvent.Modifier... modifers) throws IOException {
         final File file = watchableFile.getFile();
-        final Map<File, Long> lastModifiedMap = createLastModifiedMap(file);
         final String s = file.getAbsolutePath();
         final Pointer[] values = {CFStringRef.toCFString(s).getPointer()};
         final CFArrayRef pathsToWatch = CarbonAPI.INSTANCE.CFArrayCreate(null, values, CFIndex.valueOf(1), null);
@@ -34,8 +32,8 @@ class MacOSXListeningWatchService extends AbstractWatchService {
         final double latency = 1.0; /* Latency in seconds */
 
         final long kFSEventStreamEventIdSinceNow = -1; //  this is 0xFFFFFFFFFFFFFFFF
-        final int kFSEventStreamCreateFlagNoDefer = 0x00000002;
-        final CarbonAPI.FSEventStreamCallback callback = new MacOSXListeningCallback(watchKey, lastModifiedMap);
+        final int kFSEventStreamCreateFlagFileEvents = 0x00000010;
+        final CarbonAPI.FSEventStreamCallback callback = new MacOSXListeningCallback(watchKey);
         callbackList.add(callback);
         final FSEventStreamRef stream = CarbonAPI.INSTANCE.FSEventStreamCreate(
                 Pointer.NULL,
@@ -44,7 +42,7 @@ class MacOSXListeningWatchService extends AbstractWatchService {
                 pathsToWatch,
                 kFSEventStreamEventIdSinceNow,
                 latency,
-                kFSEventStreamCreateFlagNoDefer);
+                kFSEventStreamCreateFlagFileEvents);
 
         final CFRunLoopThread thread = new CFRunLoopThread(stream, file);
         thread.setDaemon(true);
@@ -81,25 +79,6 @@ class MacOSXListeningWatchService extends AbstractWatchService {
         }
     }
 
-    private Map<File, Long> createLastModifiedMap(File file) {
-        Map<File, Long> lastModifiedMap = new ConcurrentHashMap<File, Long>();
-        for (File child : recursiveListFiles(file)) {
-            lastModifiedMap.put(child, child.lastModified());
-        }
-        return lastModifiedMap;
-    }
-
-    private static Set<File> recursiveListFiles(File file) {
-        Set<File> files = new HashSet<File>();
-        files.add(file);
-        if (file.isDirectory()) {
-            for (File child : file.listFiles()) {
-                files.addAll(recursiveListFiles(child));
-            }
-        }
-        return files;
-    }
-
     @Override
     void implClose() throws IOException {
         for (CFRunLoopThread thread : threadList) {
@@ -113,75 +92,57 @@ class MacOSXListeningWatchService extends AbstractWatchService {
 
     private static class MacOSXListeningCallback implements CarbonAPI.FSEventStreamCallback {
         private final MacOSXWatchKey watchKey;
-        private final Map<File, Long> lastModifiedMap;
 
-        private MacOSXListeningCallback(MacOSXWatchKey watchKey, Map<File, Long> lastModifiedMap) {
+        final int kFSEventStreamEventFlagItemCreated = 0x00000100;
+        final int kFSEventStreamEventFlagItemRemoved = 0x00000200;
+        final int kFSEventStreamEventFlagItemRenamed = 0x00000800;
+        final int kFSEventStreamEventFlagItemModified = 0x00001000;
+
+        private MacOSXListeningCallback(MacOSXWatchKey watchKey) {
             this.watchKey = watchKey;
-            this.lastModifiedMap = lastModifiedMap;
         }
 
         public void invoke(FSEventStreamRef streamRef, Pointer clientCallBackInfo, NativeLong numEvents, Pointer eventPaths, Pointer /* array of unsigned int */ eventFlags, /* array of unsigned long */ Pointer eventIds) {
-            final int length = numEvents.intValue();
+            int length = numEvents.intValue();
 
-            for (String folderName : eventPaths.getStringArray(0, length)) {
-                final Set<File> filesOnDisk = recursiveListFiles(new File(folderName));
+            for (int i = 0; i < length; i++) {
+                String eventPath = eventPaths.getStringArray(0, length)[i];
+                int eventFlag = eventFlags.getIntArray(0, length)[i];
 
-                final List<File> createdFiles = findCreatedFiles(filesOnDisk);
-                final List<File> modifiedFiles = findModifiedFiles(filesOnDisk);
-                final List<File> deletedFiles = findDeletedFiles(folderName, filesOnDisk);
+                File file = new File(eventPath);
 
-                for (File file : createdFiles) {
+                if ((kFSEventStreamEventFlagItemCreated & eventFlag) != 0) {
                     if (watchKey.isReportCreateEvents()) {
                         watchKey.signalEvent(StandardWatchEventKind.ENTRY_CREATE, file);
                     }
-                    lastModifiedMap.put(file, file.lastModified());
                 }
 
-                for (File file : modifiedFiles) {
+                if ((kFSEventStreamEventFlagItemRemoved & eventFlag) != 0) {
+                    if (watchKey.isReportDeleteEvents()) {
+                        System.out.println(file.getAbsolutePath());
+                        watchKey.signalEvent(StandardWatchEventKind.ENTRY_DELETE, file);
+                    }
+                }
+
+                if ((kFSEventStreamEventFlagItemModified & eventFlag) != 0) {
                     if (watchKey.isReportModifyEvents()) {
                         watchKey.signalEvent(StandardWatchEventKind.ENTRY_MODIFY, file);
                     }
-                    lastModifiedMap.put(file, file.lastModified());
                 }
 
-                for (File file : deletedFiles) {
-                    if (watchKey.isReportDeleteEvents()) {
-                        watchKey.signalEvent(StandardWatchEventKind.ENTRY_DELETE, file);
+                if ((kFSEventStreamEventFlagItemRenamed & eventFlag) != 0) {
+                    if (!file.exists()) {
+                        if (watchKey.isReportRenameFromEvents()) {
+                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_FROM, file);
+                        }
                     }
-                    lastModifiedMap.remove(file);
+                    else {
+                        if (watchKey.isReportRenameToEvents()) {
+                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_TO, file);
+                        }
+                    }
                 }
             }
-        }
-
-        private List<File> findModifiedFiles(Set<File> filesOnDisk) {
-            List<File> modifiedFileList = new ArrayList<File>();
-            for (File file : filesOnDisk) {
-                final Long lastModified = lastModifiedMap.get(file);
-                if (lastModified != null && lastModified != file.lastModified()) {
-                    modifiedFileList.add(file);
-                }
-            }
-            return modifiedFileList;
-        }
-
-        private List<File> findCreatedFiles(Set<File> filesOnDisk) {
-            List<File> createdFileList = new ArrayList<File>();
-            for (File file : filesOnDisk) {
-                if (!lastModifiedMap.containsKey(file)) {
-                    createdFileList.add(file);
-                }
-            }
-            return createdFileList;
-        }
-
-        private List<File> findDeletedFiles(String folderName, Set<File> filesOnDisk) {
-            List<File> deletedFileList = new ArrayList<File>();
-            for (File file : lastModifiedMap.keySet()) {
-                if (file.getAbsolutePath().startsWith(folderName) && !filesOnDisk.contains(file)) {
-                    deletedFileList.add(file);
-                }
-            }
-            return deletedFileList;
         }
     }
 }

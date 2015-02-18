@@ -35,17 +35,6 @@ import java.util.List;
 abstract class AbstractWatchKey extends WatchKey {
 
     /**
-     * Maximum size of event list (in the future this may be tunable)
-     */
-    static final int MAX_EVENT_LIST_SIZE = 2048;
-
-    /**
-     * Special event to signal overflow
-     */
-    static final Event<Void> OVERFLOW_EVENT =
-            new Event<Void>(StandardWatchEventKind.OVERFLOW, null);
-
-    /**
      * Possible key states
      */
     private static enum State {
@@ -93,12 +82,6 @@ abstract class AbstractWatchKey extends WatchKey {
         synchronized (this) {
             int size = events.size();
             if (size > 1) {
-                // don't let list get too big
-                if (size >= MAX_EVENT_LIST_SIZE) {
-                    kind = StandardWatchEventKind.OVERFLOW;
-                    context = null;
-                }
-
                 // repeated event
                 WatchEvent<?> prev = events.get(size - 1);
                 if (kind == prev.kind()) {

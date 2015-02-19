@@ -119,7 +119,6 @@ class MacOSXListeningWatchService extends AbstractWatchService {
 
                 if ((kFSEventStreamEventFlagItemRemoved & eventFlag) != 0) {
                     if (watchKey.isReportDeleteEvents()) {
-                        System.out.println(file.getAbsolutePath());
                         watchKey.signalEvent(StandardWatchEventKind.ENTRY_DELETE, file);
                     }
                 }

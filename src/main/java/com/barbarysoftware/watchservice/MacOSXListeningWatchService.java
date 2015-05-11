@@ -6,6 +6,8 @@ import com.sun.jna.Pointer;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 
 /**
@@ -130,14 +132,29 @@ class MacOSXListeningWatchService extends AbstractWatchService {
                 }
 
                 if ((kFSEventStreamEventFlagItemRenamed & eventFlag) != 0) {
-                    if (!file.exists()) {
-                        if (watchKey.isReportRenameFromEvents()) {
-                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_FROM, file);
+                    Path filePath = Paths.get(file.getPath());
+
+                    String realFilePathName = null;
+
+                    try {
+                        Path realFilePath = filePath.toRealPath();
+
+                        Path realFileNameFilePath = realFilePath.getFileName();
+
+                        realFilePathName = realFileNameFilePath.toString();
+                    }
+                    catch (Exception e) {
+                        return;
+                    }
+
+                    if (file.exists() && eventPath.endsWith(realFilePathName)) {
+                        if (watchKey.isReportRenameToEvents()) {
+                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_TO, file);
                         }
                     }
                     else {
-                        if (watchKey.isReportRenameToEvents()) {
-                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_TO, file);
+                        if (watchKey.isReportRenameFromEvents()) {
+                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_FROM, file);
                         }
                     }
                 }

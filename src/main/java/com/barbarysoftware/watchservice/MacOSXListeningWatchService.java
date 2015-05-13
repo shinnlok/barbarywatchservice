@@ -134,28 +134,29 @@ class MacOSXListeningWatchService extends AbstractWatchService {
                 if ((kFSEventStreamEventFlagItemRenamed & eventFlag) != 0) {
                     Path filePath = Paths.get(file.getPath());
 
-                    String realFilePathName = null;
-
                     try {
-                        Path realFilePath = filePath.toRealPath();
+                        if (file.exists()) {
+                            Path realFilePath = filePath.toRealPath();
 
-                        Path realFileNameFilePath = realFilePath.getFileName();
+                            Path realFileNameFilePath = realFilePath.getFileName();
 
-                        realFilePathName = realFileNameFilePath.toString();
+                            String realFilePathName = realFileNameFilePath.toString();
+
+                            if (eventPath.endsWith(realFilePathName)) {
+                                if (watchKey.isReportRenameToEvents()) {
+                                    watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_TO, file);
+                                }
+
+                                return;
+                            }
+                        }
                     }
                     catch (Exception e) {
                         return;
                     }
 
-                    if (file.exists() && eventPath.endsWith(realFilePathName)) {
-                        if (watchKey.isReportRenameToEvents()) {
-                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_TO, file);
-                        }
-                    }
-                    else {
-                        if (watchKey.isReportRenameFromEvents()) {
-                            watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_FROM, file);
-                        }
+                    if (watchKey.isReportRenameFromEvents()) {
+                        watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_FROM, file);
                     }
                 }
             }

@@ -147,12 +147,12 @@ class MacOSXListeningWatchService extends AbstractWatchService {
                                     watchKey.signalEvent(ExtendedWatchEventKind.ENTRY_RENAME_TO, file);
                                 }
 
-                                return;
+                                continue;
                             }
                         }
                     }
                     catch (Exception e) {
-                        return;
+                        continue;
                     }
 
                     if (watchKey.isReportRenameFromEvents()) {

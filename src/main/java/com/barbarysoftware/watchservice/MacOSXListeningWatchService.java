@@ -8,6 +8,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.Normalizer;
 import java.util.*;
 
 /**
@@ -108,7 +109,7 @@ class MacOSXListeningWatchService extends AbstractWatchService {
             int length = numEvents.intValue();
 
             for (int i = 0; i < length; i++) {
-                String eventPath = eventPaths.getStringArray(0, length)[i];
+                String eventPath = Normalizer.normalize(eventPaths.getStringArray(0, length)[i], Normalizer.Form.NFC);
                 int eventFlag = eventFlags.getIntArray(0, length)[i];
 
                 File file = new File(eventPath);
